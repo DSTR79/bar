@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mesa · Bar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-logo">
+      <span class="icon">🍺</span>
+      <div>
+        <h1>BAR</h1>
+        <div class="subtitle">GESTIÓN</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="header-clock" id="reloj"></div>
+    </div>
+  </header>
+
+  <div class="page-mesa">
+
+    <div class="mesa-header">
+      <div class="mesa-header-left">
+        <button class="btn btn-outline btn-sm" id="btnSalir">← Salir sin guardar</button>
+        <h2 id="mesaNombre">–</h2>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-success btn-sm" id="btnGuardar">✅ Guardar mesa</button>
+      </div>
+    </div>
+
+    <div class="mesa-tabs" id="mesaTabs">
+      <button class="mesa-tab active" id="tabProductos" onclick="switchTab('productos')">
+        PRODUCTOS
+      </button>
+      <button class="mesa-tab" id="tabPedido" onclick="switchTab('pedido')">
+        🧾 PEDIDO <span class="tab-badge" id="tabBadge" style="display:none">0</span>
+      </button>
+    </div>
+
+    <div class="mesa-body">
+
+      <div class="productos-panel">
+        <div class="categorias-tabs" id="categoriasTabs">
+        </div>
+        <div class="productos-lista" id="productosLista">
+        </div>
+      </div>
+
+      <div class="pedido-panel">
+        <div class="pedido-header">
+          <h3>🧾 PEDIDO</h3>
+        </div>
+        <div class="pedido-lista" id="pedidoLista">
+          <div class="pedido-empty">
+            <div class="pedido-empty-icon">🥗</div>
+            <p>Sin artículos todavía.<br/>Añade productos desde la izquierda.</p>
+          </div>
+        </div>
+        <div class="pedido-footer">
+          <div class="pedido-total-row">
+            <span class="pedido-total-label">Total</span>
+            <span class="pedido-total-amount" id="pedidoTotal">
+              0,00 <span class="eur">€</span>
+            </span>
+          </div>
+          <div class="pedido-actions">
+            <button class="btn btn-success btn-lg" id="btnCobrar">✅ Cobrar mesa</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<div class="modal-overlay" id="modalCobrar">
+  <div class="modal modal-cobro">
+    <h3>✅ Cobrar mesa</h3>
+    <p class="modal-sub">Selecciona qué quieres cobrar o cobra todo.</p>
+
+    <div class="cobro-resumen">
+      <div class="cobro-resumen-row">
+        <span>Total pendiente</span>
+        <strong id="cobroTotalPte">0,00 €</strong>
+      </div>
+      <div class="cobro-resumen-row cobro-seleccion">
+        <span>Seleccionado</span>
+        <strong id="cobroTotalSel">0,00 €</strong>
+      </div>
+    </div>
+
+    <div class="cobro-lineas" id="cobroLineas">
+    </div>
+
+    <div class="modal-actions cobro-actions">
+      <button class="btn btn-outline" id="btnCancelarCobrar">Cancelar</button>
+      <button class="btn btn-primary" id="btnCobrarSeleccion" disabled>
+        Cobrar seleccionado
+      </button>
+      <button class="btn btn-success" id="btnCobrarTodo">
+        ✅ Cobrar todo
+      </button>
+    </div>
+  </div>
+</div>
+
+  <div class="loader-overlay" id="loader">
+    <div class="spinner"></div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="api.js"></script>
+  <script src="mesa.js"></script>
+</body>
+</html>

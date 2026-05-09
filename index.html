@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bar · Gestión de Mesas</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-logo">
+      <span class="icon">🍺</span>
+      <div>
+        <h1>BAR</h1>
+        <div class="subtitle">GESTIÓN</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="header-clock" id="reloj"></div>
+      <button class="btn btn-ghost" id="btnCambiarDispositivo">
+       ✏️<span id="headerNombreDispositivo"></span>
+      </button>
+      <button class="btn btn-ghost" onclick="window.location.href='cierre.html'">
+        📊 Cierre del día
+      </button>
+    </div>
+  </header>
+
+  <main class="page-main">
+    <div class="page-toolbar">
+      <h2>Mesas activas</h2>
+      <div class="toolbar-actions">
+        <button class="btn btn-primary" id="btnNuevaMesa">
+          ➕ Nueva Mesa
+        </button>
+      </div>
+    </div>
+
+    <div class="mesas-grid" id="mesasGrid">
+    </div>
+  </main>
+
+  <div class="modal-overlay" id="modalNombreDispositivo">
+    <div class="modal">
+      <h3>Trabajador:</h3>
+      <p class="modal-sub">Aparecerá cuando estés atendiendo una mesa.</p>
+      <div class="form-group">
+        <label for="inputNombreDispositivo">Nombre</label>
+        <input
+          type="text"
+          id="inputNombreDispositivo"
+          class="form-input"
+          placeholder="Ej: Juan Pérez, María García..."
+          maxlength="60"
+          autocomplete="off"
+        />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="btnConfirmarDispositivo">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modalCrearMesa">
+    <div class="modal">
+      <h3>➕ Nueva Mesa</h3>
+      <p class="modal-sub">Introduce el nombre o número para identificar la mesa.</p>
+      <div class="form-group">
+        <label for="inputNombreMesa">Nombre o número de mesa</label>
+        <input
+          type="text"
+          id="inputNombreMesa"
+          class="form-input"
+          placeholder="Ej: Mesa 5, Terraza 2, Barra..."
+          maxlength="40"
+          autocomplete="off"
+        />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="btnCancelarCrear">Cancelar</button>
+        <button class="btn btn-primary" id="btnConfirmarCrear">Crear Mesa</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="loader-overlay" id="loader">
+    <div class="spinner"></div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="api.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

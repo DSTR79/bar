@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cierre del día · Bar</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-logo">
+      <span class="icon">🍺</span>
+      <div>
+        <h1>Mi Bar</h1>
+        <div class="subtitle">Sistema de gestión</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="header-clock" id="reloj"></div>
+    </div>
+  </header>
+
+  <main class="page-cierre">
+
+    <div class="cierre-header">
+      <button class="btn btn-outline btn-sm" onclick="window.location.href='index.html'">← Volver</button>
+      <h2>📊 Cierre del Día</h2>
+    </div>
+
+    <!-- Alertas dinámicas -->
+    <div id="alertasContainer"></div>
+
+    <!-- Resumen de mesas pagadas -->
+    <div class="cierre-resumen" id="seccionPagadas" style="display:none">
+      <h3>🧾 Mesas cobradas hoy</h3>
+      <div class="cierre-mesas-list" id="listaMesasPagadas">
+        <!-- generado por JS -->
+      </div>
+    </div>
+
+    <!-- Mesas pendientes (bloquean el cierre) -->
+    <div class="cierre-resumen" id="seccionPendientes" style="display:none">
+      <h3 style="color:var(--danger)">⚠️ Mesas sin cobrar (bloquean el cierre)</h3>
+      <div class="mesas-pendientes-list" id="listaMesasPendientes">
+        <!-- generado por JS -->
+      </div>
+    </div>
+
+    <!-- Total del día -->
+    <div class="cierre-total-final" id="totalFinal">
+      <div>
+        <div class="label">Total del día</div>
+        <div style="font-size:12px;color:var(--brown-300);margin-top:2px" id="totalFinalDetalle"></div>
+      </div>
+      <div class="amount" id="totalDiaAmount">0,00 €</div>
+    </div>
+
+    <!-- Acciones -->
+    <div class="cierre-actions" id="cierreActions">
+      <!-- generado por JS -->
+    </div>
+
+  </main>
+
+  <!-- ░░ MODAL: CONFIRMAR NUEVO DÍA ░░ -->
+  <div class="modal-overlay" id="modalNuevoDia">
+    <div class="modal">
+      <h3>🌅 Iniciar nuevo día</h3>
+      <p class="modal-sub">
+        Esto eliminará todas las mesas cobradas y dejará el sistema limpio para el día siguiente.
+        <strong>Esta acción no se puede deshacer.</strong>
+      </p>
+      <div style="background:var(--warning-bg);border:1.5px solid #FFD54F;border-radius:var(--radius);padding:12px 16px;margin-bottom:4px;font-size:13px;color:var(--warning)">
+        ⚠️ El total del día quedará registrado en el historial interno.
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="btnCancelarNuevoDia">Cancelar</button>
+        <button class="btn btn-danger" id="btnConfirmarNuevoDia">Confirmar nuevo día</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░ LOADER ░░ -->
+  <div class="loader-overlay" id="loader">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ░░ TOASTS ░░ -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="api.js"></script>
+  <script src="cierre.js"></script>
+</body>
+</html>
