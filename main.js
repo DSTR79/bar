@@ -75,7 +75,7 @@ const estadoLabel = {
         : '<div style="font-size:12px;color:var(--text-light)">Disponible</div>';
 
     const totalFormateado = parseFloat(MESAS.TOTAL || 0).toFixed(2).replace('.', ',');
-    const numItems = parseInt(MESAS.NUM_LINEAS || 0);
+    const numItems = parseInt(MESAS.NUM_ARTICULOS || MESAS.NUM_LINEAS || 0);
 
     return `
       <div class="mesa-card ${claseCSS}"
@@ -88,8 +88,9 @@ const estadoLabel = {
         </div>
         <div class="mesa-info">${infoHtml}</div>
         <div class="mesa-total">
-          ${totalFormateado} <span>€ · ${numItems} art.</span>
+          ${totalFormateado} €
         </div>
+        <div class="mesa-items">${numItems} artículos</div>
       </div>`;
   }).join('');
 }
@@ -140,7 +141,7 @@ function bindEventos() {
 window.crearNuevaMesa = async function () {
   const nombre = document.getElementById('inputNombreMesa').value.trim() || 'Mesa sin nombre';
   try {
-    const data = await API.nuevaMesa(nombre);
+    const data = await API.crearMesa(nombre);
     window.location.href = `mesa.html?id=${data.mesa}&comanda=${data.comanda_id}`;
   } catch (err) {
     mostrarToast(err.message, 'error');

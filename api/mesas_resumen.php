@@ -1,0 +1,39 @@
+<?php
+require_once 'db.php';
+header('Content-Type: application/json; charset=utf-8');
+
+try {
+    $mesasStmt = $pdo->query('SELECT MESA, NOMBRE_MESA AS NOMBRE, ESTADO_MESA AS ESTADO, ABIERTO_POR FROM MESAS');
+    $mesas = [];
+    while ($m = $mesasStmt->fetch(PDO::FETCH_ASSOC)) {
+        $id = $m['MESA'];
+        $sumUnids = 0.0;
+        $sumTotal = 0.0;
+
+        $linesStmt = $pdo->prepare('SELECT UNIDS, PV_LIN, ESTADO_LIN FROM LINEAS WHERE MESA_LIN = ?');
+        $linesStmt->execute([$id]);
+        while ($l = $linesStmt->fetch(PDO::FETCH_ASSOC)) {
+            $estado = $l['ESTADO_LIN'] ?? '';
+            if (trim($estado) === 'PAGADO') continue;
+            $unids = floatval(str_replace(',', '.', $l['UNIDS'] ?? 0));
+            $pv = floatval(str_replace(',', '.', $l['PV_LIN'] ?? 0));
+            $sumUnids += $unids;
+            $sumTotal += $unids * $pv;
+        }
+
+        $mesas[] = [
+            'MESA' => $id,
+            'NOMBRE' => $m['NOMBRE'],
+            'ESTADO' => $m['ESTADO'],
+            'ABIERTO_POR' => $m['ABIERTO_POR'],
+            'TOTAL' => number_format($sumTotal, 8, '.', ''),
+            'TOTAL_PTE' => number_format($sumTotal, 8, '.', ''),
+            'NUM_ARTICULOS' => number_format($sumUnids, 4, '.', '')
+        ];
+    }
+
+    echo json_encode($mesas);
+} catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['error' => $e->getMessage()]);
+}

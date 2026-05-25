@@ -1,62 +1,761 @@
 <?php
 require_once 'db.php';
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
-$method = $_SERVER['REQUEST_METHOD'];
+function getJsonBody() {
+    static $body;
+    if ($body === null) {
+        $raw = file_get_contents('php://input');
+        $body = json_decode($raw, true);
+        if (!is_array($body)) {
+            $body = [];
+        }
+    }
+    return $body;
+}
 
-if ($method === 'GET') {
+function sendJson($payload, int $status = 200) {
+    http_response_code($status);
+    echo json_encode($payload);
+    exit;
+}
+
+function sendError(string $message, int $status = 400) {
+    sendJson(['error' => $message], $status);
+}
+
+function getRequestParam(string $key, $default = null) {
+    if (isset($_REQUEST[$key])) {
+        return $_REQUEST[$key];
+    }
+    $body = getJsonBody();
+    return $body[$key] ?? $default;
+}
+
+function listarMesas() {
+    global $pdo;
+
     try {
         $pdo->exec("UPDATE MESAS SET ESTADO_MESA = 'DISPONIBLE', ABIERTO_POR = NULL WHERE ESTADO_MESA = 'OCUPADA' AND (LAST_PING IS NULL OR LAST_PING < DATE_SUB(NOW(), INTERVAL 30 SECOND))");
 
-        $stmt = $pdo->query("
-            SELECT 
-                m.FECHA_APERTURA    AS FECHA,
-                m.MESA              AS MESA,
-                m.NOMBRE_MESA       AS NOMBRE,
-                m.ESTADO_MESA       AS ESTADO,
-                m.ABIERTO_POR       AS ABIERTO_POR,
-                m.TOTAL_PTE         AS TOTAL_PTE,
-                COALESCE(SUM(l.UNIDS * l.PV_LIN), 0) AS TOTAL
+        $stmt = $pdo->query("SELECT 
+                m.FECHA_APERTURA AS FECHA,
+                m.MESA,
+                m.NOMBRE_MESA AS NOMBRE,
+                m.ESTADO_MESA AS ESTADO,
+                m.ABIERTO_POR,
+                m.TOTAL_PTE,
+                COALESCE(lin.TOTAL, 0) AS TOTAL
             FROM MESAS m
-            LEFT JOIN LINEAS l ON l.MESA_LIN = m.MESA
-            GROUP BY m.MESA, m.FECHA_APERTURA, m.NOMBRE_MESA, m.ESTADO_MESA, m.ABIERTO_POR, m.TOTAL_PTE
-        ");
-        $mesas = $stmt->fetchAll();
-        echo json_encode($mesas);
-    } catch (Exception $e) {
-        error_log('Error in mesas.php GET: ' . $e->getMessage());
-        http_response_code(500);
-        echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
+            LEFT JOIN (
+                SELECT 
+                    MESA_LIN,
+                    SUM(
+                        CASE 
+WHEN COALESCE(ESTADO_LIN,'') != 'PAGADO' THEN UNIDS * PV_LIN
+                            ELSE 0
+                        END
+                    ) AS TOTAL
+                FROM LINEAS
+                GROUP BY MESA_LIN
+            ) lin ON lin.MESA_LIN = m.MESA");
+
+        sendJson($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        error_log('Error in mesas.php listar: ' . $e->getMessage());
+        sendError('Database error: ' . $e->getMessage(), 500);
     }
-} elseif ($method === 'POST') {
-    $input = json_decode(file_get_contents('php://input'), true);
-    $nombre = trim($input['nombre'] ?? '');
+}
+
+function crearMesa() {
+    global $pdo;
+    $body = getJsonBody();
+    $nombre = trim($body['nombre'] ?? '');
 
     if (!$nombre) {
-        http_response_code(400);
-        echo json_encode(['error' => 'El nombre de la mesa es obligatorio']);
-        exit;
+        sendError('El nombre de la mesa es obligatorio', 400);
     }
 
     try {
-        $id_mesa = null;
         $stmt = $pdo->prepare('CALL NUEVA_MESA(?, @r_Mesa, @r_Comanda)');
         $stmt->execute([$nombre]);
-        $result = $pdo->query('SELECT @r_Mesa AS mesa, @r_Comanda AS comanda_id')->fetch();
+        $result = $pdo->query('SELECT @r_Mesa AS mesa, @r_Comanda AS comanda_id')->fetch(PDO::FETCH_ASSOC);
 
-        http_response_code(201);
-    echo json_encode([
-        'success'    => true,
-        'mesa'       => $result['mesa'],
-        'nombre'     => $nombre,
-        'comanda_id' => $result['comanda_id']
-    ]);
-    } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(['error' => $e->getMessage()]);
+        sendJson([
+            'success' => true,
+            'mesa' => $result['mesa'],
+            'nombre' => $nombre,
+            'comanda_id' => $result['comanda_id']
+        ], 201);
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
     }
-} else {
-    http_response_code(405);
-    echo json_encode(['error' => 'Método no permitido']);
 }
-?>
+
+function entrarMesa() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $id = $body['id'] ?? '';
+    $camarero = trim($body['camarero'] ?? 'Sin nombre');
+
+    if (!$id) {
+        sendError('El ID de la mesa es obligatorio', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM MESAS WHERE MESA = ?');
+        $stmt->execute([$id]);
+        $mesa = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$mesa) {
+            sendError('Mesa no encontrada', 404);
+        }
+
+        if (($mesa['ESTADO_MESA'] ?? '') === 'OCUPADA') {
+            sendError('Mesa bloqueada por ' . ($mesa['ABIERTA_POR'] ?? 'otro usuario') . '. Espera a que termine.', 403);
+        }
+        if (($mesa['ESTADO_MESA'] ?? '') === 'COBRADA') {
+            sendError('Esta mesa ya está cobrada y cerrada.', 400);
+        }
+
+        $stmt = $pdo->prepare('CALL CAMBIAR_ESTADO_MESA (?, "OCUPADA", ?)');
+        $stmt->execute([$id, $camarero]);
+
+        $stmt = $pdo->prepare('SELECT * FROM MESAS WHERE MESA = ?');
+        $stmt->execute([$id]);
+        $updated = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $stmt = $pdo->prepare('CALL NUEVA_COMANDA(?, @r_Comanda)');
+        $stmt->execute([$id]);
+        $result = $pdo->query('SELECT @r_Comanda AS comanda_id')->fetch(PDO::FETCH_ASSOC);
+
+        sendJson(['mesa' => $updated, 'comanda_id' => $result['comanda_id'], 'success' => true]);
+    } catch (Throwable $e) {
+        sendError('Error de servidor: ' . $e->getMessage(), 500);
+    }
+}
+
+function guardarYSalir() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $id = $body['id'] ?? '';
+    $comanda = $body['comanda'] ?? '';
+
+    if (!$id || !$comanda) {
+        sendError('El ID de la mesa y la comanda son obligatorios', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('CALL GUARDAR_COMANDA(?, "EN CURSO", "PEDIDO")');
+        $stmt->execute([$comanda]);
+        sendJson(['success' => true]);
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function borrarLineasCanceladas() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $id = $body['id'] ?? '';
+    $comanda = $body['comanda'] ?? '';
+
+    if (!$id || !$comanda) {
+        sendError('El ID de la mesa y la comanda son obligatorios', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('CALL BORRAR_LINEAS_CANCELADAS(?)');
+        $stmt->execute([(int)$comanda]);
+        sendJson(['success' => true]);
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function actualizarLinea() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $id = $body['id'] ?? '';
+    $producto_id = $body['producto_id'] ?? '';
+    $cantidad = (int)($body['cantidad'] ?? 0);
+    $comanda_id = $body['comanda_id'] ?? null;
+
+    if (!$id || !$producto_id || !$comanda_id) {
+        sendError('id, producto_id y comanda_id son obligatorios', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT MESA FROM MESAS WHERE MESA = ?');
+        $stmt->execute([$id]);
+        if (!$stmt->fetch()) {
+            sendError('Mesa no encontrada', 403);
+        }
+
+        $stmt = $pdo->prepare('SELECT * FROM ARTICULOS WHERE REF = ? AND ACTIVO = 1');
+        $stmt->execute([$producto_id]);
+        $articulo = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$articulo) {
+            sendError('Artículo no encontrado', 404);
+        }
+
+        $stmt = $pdo->prepare('SELECT LINEA FROM LINEAS WHERE REF_LIN = ? AND MESA_LIN = ? AND COMANDA_LIN = ?');
+        $stmt->execute([$producto_id, $id, $comanda_id]);
+        $linea = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($linea) {
+            if ($cantidad <= 0) {
+                $stmt = $pdo->prepare('DELETE FROM LINEAS WHERE LINEA = ?');
+                $stmt->execute([$linea['LINEA']]);
+            } else {
+                $stmt = $pdo->prepare('UPDATE LINEAS SET UNIDS = ? WHERE LINEA = ?');
+                $stmt->execute([$cantidad, $linea['LINEA']]);
+            }
+        } elseif ($cantidad > 0) {
+            $stmt = $pdo->prepare('INSERT INTO LINEAS (COMANDA_LIN, MESA_LIN, REF_LIN, TEXTO_LIN, UNIDS, PV_LIN, IVA_LIN, BASE_LIN, ESTADO_LIN) VALUES (?, ?, ?, ?, ?, ?, 0, ?, "EN CURSO")');
+            $stmt->execute([
+                $comanda_id,
+                $id,
+                $producto_id,
+                $articulo['TEXTO_ARTICULO'],
+                $cantidad,
+                $articulo['PV'],
+                $articulo['PV'] * $cantidad
+            ]);
+        }
+
+        $stmt = $pdo->prepare("SELECT l.LINEA AS id, l.REF_LIN AS producto_id, l.UNIDS AS cantidad, l.PV_LIN AS precio_unitario, l.ESTADO_LIN AS estado, l.TEXTO_LIN AS producto_nombre, (l.UNIDS * l.PV_LIN) AS subtotal FROM LINEAS l WHERE l.MESA_LIN = ? AND l.COMANDA_LIN = ? ORDER BY l.ESTADO_LIN ASC");
+        $stmt->execute([$id, $comanda_id]);
+        sendJson($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function cobrarMesa() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $id = $body['id'] ?? '';
+    $items = $body['items'] ?? [];
+    $todo = filter_var($body['todo'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    $camarero = trim($body['camarero'] ?? 'Sin nombre');
+
+    if (!$id) {
+        sendError('ID es obligatorio', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT TOTAL_PTE FROM MESAS WHERE MESA = ?');
+        $stmt->execute([$id]);
+        $mesa = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$mesa) {
+            sendError('Mesa no encontrada', 403);
+        }
+
+        $pdo->beginTransaction();
+
+        if ($todo) {
+            $stmt = $pdo->prepare("UPDATE LINEAS SET ESTADO_LIN = 'PAGADO' WHERE MESA_LIN = ? AND COALESCE(ESTADO_LIN,'') != 'PAGADO'");
+            $stmt->execute([$id]);
+
+            $stmt = $pdo->prepare('UPDATE MESAS SET ESTADO_MESA = "COBRADA", TOTAL_PTE = 0, ABIERTO_POR = NULL WHERE MESA = ?');
+            $stmt->execute([$id]);
+        } else {
+            $computed = array_reduce($items, fn($s, $i) => $s + (($i['cantidad'] ?? 0) * ($i['precio_unitario'] ?? 0)), 0);
+            $useTotal = $computed > 0 ? $computed : floatval($body['total'] ?? 0);
+
+            if ($useTotal <= 0) {
+                $pdo->commit();
+                sendJson(['success' => true]);
+            }
+
+            $paid = 0.0;
+            if (!empty($items) && isset($items[0]['producto_id'])) {
+                foreach ($items as $it) {
+                    $qtyToPay = (int)($it['cantidad'] ?? 0);
+                    $pid = $it['producto_id'];
+
+                    while ($qtyToPay > 0) {
+                        $stmt = $pdo->prepare('SELECT * FROM LINEAS WHERE MESA_LIN = ? AND REF_LIN = ? AND COALESCE(ESTADO_LIN,"") != "PAGADO" ORDER BY COMANDA_LIN ASC, LINEA ASC LIMIT 1');
+                        $stmt->execute([$id, $pid]);
+                        $lin = $stmt->fetch(PDO::FETCH_ASSOC);
+                        if (!$lin) break;
+
+                        $lineaId = $lin['LINEA'];
+                        $unids = (int)$lin['UNIDS'];
+                        $pv = floatval($lin['PV_LIN']);
+
+                        if ($unids <= $qtyToPay) {
+                            $stmt = $pdo->prepare('UPDATE LINEAS SET ESTADO_LIN = "PAGADO" WHERE LINEA = ?');
+                            $stmt->execute([$lineaId]);
+                            $paid += $unids * $pv;
+                            $qtyToPay -= $unids;
+                        } else {
+                            $stmt = $pdo->prepare('UPDATE LINEAS SET UNIDS = UNIDS - ? WHERE LINEA = ?');
+                            $stmt->execute([$qtyToPay, $lineaId]);
+
+                            $stmt = $pdo->prepare('INSERT INTO LINEAS (COMANDA_LIN, MESA_LIN, REF_LIN, TEXTO_LIN, UNIDS, PV_LIN, IVA_LIN, BASE_LIN, ESTADO_LIN) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "PAGADO")');
+                            $stmt->execute([
+                                $lin['COMANDA_LIN'], $lin['MESA_LIN'], $lin['REF_LIN'], $lin['TEXTO_LIN'], $qtyToPay, $lin['PV_LIN'], $lin['IVA_LIN'], $lin['BASE_LIN'] * ($qtyToPay / max(1, $unids))
+                            ]);
+
+                            $paid += $qtyToPay * $pv;
+                            $qtyToPay = 0;
+                        }
+                    }
+                }
+            }
+
+            if ($paid < $useTotal) {
+                $remaining = $useTotal - $paid;
+                while ($remaining > 0) {
+                    $stmt = $pdo->prepare('SELECT * FROM LINEAS WHERE MESA_LIN = ? AND COALESCE(ESTADO_LIN,"") != "PAGADO" ORDER BY COMANDA_LIN ASC, LINEA ASC LIMIT 1');
+                    $stmt->execute([$id]);
+                    $lin = $stmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$lin) break;
+
+                    $lineaId = $lin['LINEA'];
+                    $unids = (int)$lin['UNIDS'];
+                    $pv = floatval($lin['PV_LIN']);
+                    $lineTotal = $unids * $pv;
+
+                    if ($lineTotal <= $remaining + 0.0001) {
+                        $stmt = $pdo->prepare('UPDATE LINEAS SET ESTADO_LIN = "PAGADO" WHERE LINEA = ?');
+                        $stmt->execute([$lineaId]);
+                        $remaining -= $lineTotal;
+                        $paid += $lineTotal;
+                    } else {
+                        $unitsToPay = (int)floor($remaining / max(0.000001, $pv));
+                        if ($unitsToPay <= 0) $unitsToPay = 1;
+
+                        if ($unitsToPay >= $unids) {
+                            $stmt = $pdo->prepare('UPDATE LINEAS SET ESTADO_LIN = "PAGADO" WHERE LINEA = ?');
+                            $stmt->execute([$lineaId]);
+                            $paid += $unids * $pv;
+                            $remaining -= $unids * $pv;
+                        } else {
+                            $stmt = $pdo->prepare('UPDATE LINEAS SET UNIDS = UNIDS - ? WHERE LINEA = ?');
+                            $stmt->execute([$unitsToPay, $lineaId]);
+
+                            $stmt = $pdo->prepare('INSERT INTO LINEAS (COMANDA_LIN, MESA_LIN, REF_LIN, TEXTO_LIN, UNIDS, PV_LIN, IVA_LIN, BASE_LIN, ESTADO_LIN) VALUES (?, ?, ?, ?, ?, ?, ?, ?, "PAGADO")');
+                            $stmt->execute([
+                                $lin['COMANDA_LIN'], $lin['MESA_LIN'], $lin['REF_LIN'], $lin['TEXTO_LIN'], $unitsToPay, $lin['PV_LIN'], $lin['IVA_LIN'], $lin['BASE_LIN'] * ($unitsToPay / max(1, $unids))
+                            ]);
+
+                            $paid += $unitsToPay * $pv;
+                            $remaining -= $unitsToPay * $pv;
+                        }
+                    }
+                }
+            }
+
+            $stmt = $pdo->prepare('UPDATE MESAS SET TOTAL_PTE = GREATEST(0, TOTAL_PTE - ?) WHERE MESA = ?');
+            $stmt->execute([$paid, $id]);
+        }
+
+        $pdo->commit();
+        $stmt = $pdo->prepare("
+            SELECT 
+                a.TEXTO_ARTICULO AS nombre,
+                l.UNIDS          AS cantidad,
+                l.PV_LIN         AS precio,
+                (l.UNIDS * l.PV_LIN) AS subtotal
+            FROM LINEAS l
+            JOIN ARTICULOS a ON a.REF = l.REF_LIN
+            WHERE l.MESA_LIN = ? AND l.ESTADO_LIN = 'PAGADO'
+            ORDER BY a.TEXTO_ARTICULO ASC
+        ");
+        $stmt->execute([$id]);
+        $ticketLineas = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $stmt2 = $pdo->prepare('SELECT NOMBRE_MESA FROM MESAS WHERE MESA = ?');
+        $stmt2->execute([$id]);
+        $mesaNombre = $stmt2->fetchColumn();
+
+        $totalTicket = array_reduce($ticketLineas, fn($s, $l) => $s + floatval($l['subtotal']), 0);
+
+        sendJson([
+            'success' => true,
+            'ticket' => [
+                'mesa'    => $mesaNombre,
+                'fecha'   => date('d/m/Y H:i:s'),
+                'lineas'  => $ticketLineas,
+                'total'   => number_format($totalTicket, 2, '.', ''),
+            ]
+        ]);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function agregarComentario() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $linea_id = $body['linea_id'] ?? null;
+    $comentario = trim($body['comentario'] ?? '');
+    $mesa_id = $body['mesa_id'] ?? null;
+    $comanda_id = $body['comanda_id'] ?? null;
+
+    if (!$linea_id || !$comentario || !$mesa_id || !$comanda_id) {
+        sendError('Faltan parámetros', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM LINEAS WHERE LINEA = ? AND MESA_LIN = ?');
+        $stmt->execute([$linea_id, $mesa_id]);
+        $linea = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$linea) {
+            sendError('Línea no encontrada', 404);
+        }
+
+        $textoBase = $linea['TEXTO_LIN'];
+        $nuevoTexto = strtoupper($textoBase . ' ' . $comentario);
+
+        if ((int)$linea['UNIDS'] <= 1) {
+            $stmt = $pdo->prepare('UPDATE LINEAS SET TEXTO_LIN = ? WHERE LINEA = ?');
+            $stmt->execute([$nuevoTexto, $linea_id]);
+        } else {
+            $stmt = $pdo->prepare('UPDATE LINEAS SET UNIDS = UNIDS - 1 WHERE LINEA = ?');
+            $stmt->execute([$linea_id]);
+
+            $stmt = $pdo->prepare('INSERT INTO LINEAS (COMANDA_LIN, MESA_LIN, REF_LIN, TEXTO_LIN, UNIDS, PV_LIN, IVA_LIN, BASE_LIN, ESTADO_LIN) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)');
+            $stmt->execute([
+                $comanda_id,
+                $mesa_id,
+                $linea['REF_LIN'],
+                $nuevoTexto,
+                $linea['PV_LIN'],
+                $linea['IVA_LIN'],
+                $linea['BASE_LIN'] / max(1, (int)$linea['UNIDS']),
+                $linea['ESTADO_LIN'],
+            ]);
+        }
+
+        $stmt = $pdo->prepare('SELECT l.LINEA AS id, l.REF_LIN AS producto_id, l.UNIDS AS cantidad, l.PV_LIN AS precio_unitario, l.ESTADO_LIN AS estado, l.TEXTO_LIN AS producto_nombre, l.COMANDA_LIN AS comanda_id, (l.UNIDS * l.PV_LIN) AS subtotal FROM LINEAS l WHERE l.MESA_LIN = ? AND l.COMANDA_LIN = ? ORDER BY l.ESTADO_LIN ASC');
+        $stmt->execute([$mesa_id, $comanda_id]);
+        sendJson($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function actualizarLineaPorId() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $linea_id = $body['linea_id'] ?? null;
+    $cantidad = (int)($body['cantidad'] ?? 0);
+    $mesa_id = $body['mesa_id'] ?? null;
+    $comanda_id = $body['comanda_id'] ?? null;
+
+    if (!$linea_id || !$mesa_id || !$comanda_id) {
+        sendError('Faltan parámetros', 400);
+    }
+
+    try {
+        if ($cantidad <= 0) {
+            $stmt = $pdo->prepare('DELETE FROM LINEAS WHERE LINEA = ? AND MESA_LIN = ?');
+            $stmt->execute([$linea_id, $mesa_id]);
+        } else {
+            $stmt = $pdo->prepare('UPDATE LINEAS SET UNIDS = ? WHERE LINEA = ? AND MESA_LIN = ?');
+            $stmt->execute([$cantidad, $linea_id, $mesa_id]);
+        }
+
+        $stmt = $pdo->prepare('SELECT l.LINEA AS id, l.REF_LIN AS producto_id, l.UNIDS AS cantidad, l.PV_LIN AS precio_unitario, l.ESTADO_LIN AS estado, l.TEXTO_LIN AS producto_nombre, l.COMANDA_LIN AS comanda_id, (l.UNIDS * l.PV_LIN) AS subtotal FROM LINEAS l WHERE l.MESA_LIN = ? AND l.COMANDA_LIN = ? ORDER BY l.ESTADO_LIN ASC');
+        $stmt->execute([$mesa_id, $comanda_id]);
+        sendJson($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function repetirLinea() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $mesa_id = $body['mesa_id'] ?? null;
+    $comanda_id = $body['comanda_id'] ?? null;
+    $producto_id = $body['producto_id'] ?? null;
+    $texto = $body['texto'] ?? null;
+
+    if (!$mesa_id || !$comanda_id || !$producto_id || !$texto) {
+        sendError('Faltan parámetros', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT PV_LIN, IVA_LIN FROM LINEAS WHERE REF_LIN = ? AND MESA_LIN = ? LIMIT 1');
+        $stmt->execute([$producto_id, $mesa_id]);
+        $ref = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$ref) {
+            sendError('Producto no encontrado', 404);
+        }
+
+        $stmt = $pdo->prepare('SELECT LINEA, UNIDS FROM LINEAS WHERE MESA_LIN = ? AND COMANDA_LIN = ? AND TEXTO_LIN = ? AND REF_LIN = ?');
+        $stmt->execute([$mesa_id, $comanda_id, $texto, $producto_id]);
+        $existe = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($existe) {
+            $stmt = $pdo->prepare('UPDATE LINEAS SET UNIDS = UNIDS + 1 WHERE LINEA = ?');
+            $stmt->execute([$existe['LINEA']]);
+        } else {
+            $stmt = $pdo->prepare('INSERT INTO LINEAS (COMANDA_LIN, MESA_LIN, REF_LIN, TEXTO_LIN, UNIDS, PV_LIN, IVA_LIN, BASE_LIN, ESTADO_LIN) VALUES (?, ?, ?, ?, 1, ?, ?, ?, "EN CURSO")');
+            $stmt->execute([
+                $comanda_id,
+                $mesa_id,
+                $producto_id,
+                $texto,
+                $ref['PV_LIN'],
+                $ref['IVA_LIN'],
+                $ref['PV_LIN'],
+            ]);
+        }
+
+        $stmt = $pdo->prepare('SELECT l.LINEA AS id, l.REF_LIN AS producto_id, l.UNIDS AS cantidad, l.PV_LIN AS precio_unitario, l.ESTADO_LIN AS estado, l.TEXTO_LIN AS producto_nombre, l.COMANDA_LIN AS comanda_id, (l.UNIDS * l.PV_LIN) AS subtotal FROM LINEAS l WHERE l.MESA_LIN = ? AND l.COMANDA_LIN = ? ORDER BY l.ESTADO_LIN ASC');
+        $stmt->execute([$mesa_id, $comanda_id]);
+        sendJson($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function restaurarMesa() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $id = $body['id'] ?? '';
+    $lineas = $body['lineas'] ?? [];
+
+    if (!$id) {
+        sendError('Faltan parámetros', 401);
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT MESA FROM MESAS WHERE MESA = ?');
+        $stmt->execute([$id]);
+        if (!$stmt->fetch()) {
+            sendError('Acceso denegado', 403);
+        }
+
+        $stmt = $pdo->prepare('DELETE FROM LINEAS WHERE MESA_LIN = ?');
+        $stmt->execute([$id]);
+
+        $stmt = $pdo->prepare('SELECT COMANDA FROM COMANDAS WHERE MESA_COM = ? ORDER BY FECHA_COM DESC LIMIT 1');
+        $stmt->execute([$id]);
+        $comanda = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$comanda) {
+            $stmt = $pdo->prepare('INSERT INTO COMANDAS (MESA_COM, NOMBRE_COM, FECHA_COM) VALUES (?, ?, NOW())');
+            $stmt->execute([$id, 'Comanda mesa ' . $id]);
+            $comanda_id = $pdo->lastInsertId();
+        } else {
+            $comanda_id = $comanda['COMANDA'];
+        }
+
+        foreach ($lineas as $l) {
+            $stmt = $pdo->prepare('INSERT INTO LINEAS (COMANDA_LIN, MESA_LIN, REF_LIN, TEXTO_LIN, UNIDS, PV_LIN, IVA_LIN, BASE_LIN, ESTADO_LIN) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)');
+            $stmt->execute([
+                $comanda_id,
+                $id,
+                $l['producto_id'],
+                $l['producto_nombre'],
+                $l['cantidad'],
+                $l['precio_unitario'],
+                $l['precio_unitario'] * $l['cantidad'],
+                $l['estado'] ?? 'EN CURSO',
+            ]);
+        }
+
+        sendJson(['success' => true]);
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function resumenMesas() {
+    global $pdo;
+    try {
+        $stmt = $pdo->query("SELECT 
+            m.MESA,
+            m.NOMBRE_MESA AS NOMBRE,
+            m.ESTADO_MESA AS ESTADO,
+            m.ABIERTO_POR,
+            COALESCE(SUM(l.UNIDS * l.PV_LIN), 0) AS TOTAL,
+            COALESCE(SUM(CASE WHEN l.ESTADO_LIN != 'PAGADO' THEN l.UNIDS * l.PV_LIN ELSE 0 END), 0) AS TOTAL_PTE,
+            COALESCE(SUM(CASE WHEN l.ESTADO_LIN != 'PAGADO' THEN l.UNIDS ELSE 0 END), 0) AS NUM_ARTICULOS
+        FROM MESAS m
+        LEFT JOIN LINEAS l ON l.MESA_LIN = m.MESA
+        GROUP BY m.MESA, m.NOMBRE_MESA, m.ESTADO_MESA, m.ABIERTO_POR");
+
+        sendJson($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function detalleMesa() {
+    global $pdo;
+    $id = getRequestParam('id');
+    $comanda_id = getRequestParam('comanda');
+
+    if (!$id) {
+        sendError('id es obligatoria', 401);
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM MESAS WHERE MESA = ?');
+        $stmt->execute([$id]);
+        $mesa = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$mesa) {
+            sendError('Acceso denegado', 403);
+        }
+
+        $stmt = $pdo->prepare("SELECT l.LINEA AS id, l.REF_LIN AS producto_id, l.UNIDS AS cantidad, l.PV_LIN AS precio_unitario, l.ESTADO_LIN AS estado, l.TEXTO_LIN AS producto_nombre, l.COMANDA_LIN AS comanda_id, (l.UNIDS * l.PV_LIN) AS subtotal FROM LINEAS l WHERE l.MESA_LIN = ? AND l.ESTADO_LIN <> 'PAGADO' AND l.ESTADO_LIN <> 'EN CURSO' ORDER BY CASE l.ESTADO_LIN WHEN 'PEDIDO' THEN 1 WHEN 'EN CURSO' THEN 2 WHEN 'LISTO' THEN 3 WHEN 'SERVIDO' THEN 4 ELSE 5 END ASC, l.COMANDA_LIN ASC");
+        $stmt->execute([$id]);
+        $lineas = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $actual = array_values(array_filter($lineas, function ($l) use ($comanda_id) {
+            return $l['comanda_id'] == $comanda_id;
+        }));
+
+        $anterior = array_values(array_filter($lineas, function ($l) use ($comanda_id) {
+            return $l['comanda_id'] != $comanda_id;
+        }));
+
+        $anteriorAgrupadas = [];
+        foreach ($anterior as $l) {
+            $key = $l['producto_id'] . '_' . $l['estado'] . '_' . $l['producto_nombre'];
+            if (!isset($anteriorAgrupadas[$key])) {
+                $anteriorAgrupadas[$key] = $l;
+            } else {
+                $anteriorAgrupadas[$key]['cantidad'] += (int)$l['cantidad'];
+                $anteriorAgrupadas[$key]['subtotal'] += (float)$l['subtotal'];
+            }
+        }
+
+        sendJson([
+            'mesa' => $mesa,
+            'lineas' => $actual,
+            'lineas_anteriores' => array_values($anteriorAgrupadas)
+        ]);
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function lineasCobro() {
+    global $pdo;
+    $id = getRequestParam('id');
+
+    if (!$id) {
+        sendError('id es obligatorio', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare("SELECT l.REF_LIN AS producto_id, MAX(l.TEXTO_LIN) AS producto_nombre, l.PV_LIN AS precio_unitario, SUM(l.UNIDS) AS cantidad_total, SUM(l.UNIDS * l.PV_LIN) AS subtotal FROM LINEAS l WHERE l.MESA_LIN = ? AND l.ESTADO_LIN = 'SERVIDO' GROUP BY l.REF_LIN, l.PV_LIN ORDER BY producto_nombre ASC");
+        $stmt->execute([$id]);
+        $lineas = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $stmt = $pdo->prepare('SELECT SUM(l.UNIDS * l.PV_LIN) AS TOTAL_PTE FROM LINEAS l WHERE l.MESA_LIN = ? AND COALESCE(l.ESTADO_LIN, "") != "PAGADO"');
+        $stmt->execute([$id]);
+        $mesa = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        sendJson([
+            'lineas' => $lineas,
+            'total_pte' => $mesa['TOTAL_PTE'] ?? 0
+        ]);
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+function estadoMesa() {
+    global $pdo;
+    $body = getJsonBody();
+
+    $id = $body['id'] ?? null;
+    $estado = $body['estado'] ?? null;
+
+    if (!$id || !$estado) {
+        sendError('Faltan datos', 400);
+    }
+
+    try {
+        $stmt = $pdo->prepare('UPDATE MESAS SET ESTADO_MESA = ? WHERE MESA = ?');
+        $stmt->execute([$estado, $id]);
+        sendJson(['success' => true]);
+    } catch (Throwable $e) {
+        sendError($e->getMessage(), 500);
+    }
+}
+
+$action = $_REQUEST['action'] ?? null;
+$method = $_SERVER['REQUEST_METHOD'];
+
+if ($action === null) {
+    if ($method === 'GET') {
+        listarMesas();
+    }
+    if ($method === 'POST') {
+        crearMesa();
+    }
+    sendError('Método no permitido', 405);
+}
+
+switch ($action) {
+    case 'listar':
+        listarMesas();
+        break;
+    case 'crear':
+        crearMesa();
+        break;
+    case 'entrar':
+        entrarMesa();
+        break;
+    case 'guardar':
+        guardarYSalir();
+        break;
+    case 'salir':
+        borrarLineasCanceladas();
+        break;
+    case 'linea':
+        actualizarLinea();
+        break;
+    case 'cobrar':
+        cobrarMesa();
+        break;
+    case 'comentario':
+        agregarComentario();
+        break;
+    case 'linea_id':
+        actualizarLineaPorId();
+        break;
+    case 'repetir':
+        repetirLinea();
+        break;
+    case 'restaurar':
+        restaurarMesa();
+        break;
+    case 'resumen':
+        resumenMesas();
+        break;
+    case 'detalle':
+        detalleMesa();
+        break;
+    case 'lineas_cobro':
+        lineasCobro();
+        break;
+    case 'estado':
+        estadoMesa();
+        break;
+    default:
+        sendError('Acción desconocida', 400);
+}

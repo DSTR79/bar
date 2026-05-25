@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Cobro · Bar</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link rel="stylesheet" href="cobro.css"/>
+</head>
+<body>
+  <header class="header">
+    <div class="header-logo">
+      <span class="icon">💶</span>
+      <div><h1>BAR</h1><div class="subtitle">COBRO</div></div>
+    </div>
+    <div class="header-right">
+      <div class="header-clock" id="reloj"></div>
+    </div>
+  </header>
+
+  <div id="vistasMesas">
+    <div class="cobro-page-toolbar">
+      <h2>Selecciona una mesa</h2>
+    </div>
+    <div class="cobro-mesas-grid" id="cobroMesasGrid"></div>
+  </div>
+
+  <div id="vistaCobro" style="display:none" class="cobro-vista">
+    <div class="cobro-top-bar">
+      <button class="btn btn-outline" onclick="volverMesas()">← Mesas</button>
+      <h2 id="cobroMesaNombre">–</h2>
+      <div class="cobro-pte-badge">
+        Pendiente: <strong id="cobroTotalPte">0,00 €</strong>
+      </div>
+    </div>
+
+    <div class="cobro-body">
+      <div class="cobro-articulos">
+        <h3 class="cobro-section-title">Artículos pedidos</h3>
+        <div id="cobroLineas"></div>
+      </div>
+
+      <div class="cobro-panel-derecho">
+        <div class="cobro-resumen">
+          <div class="cobro-resumen-fila">
+            <span>Total pendiente</span>
+            <strong id="resumenPte">0,00 €</strong>
+          </div>
+          <div class="cobro-resumen-fila cobro-resumen-sel">
+            <span>Seleccionado</span>
+            <strong id="resumenSel">0,00 €</strong>
+          </div>
+        </div>
+
+        <div class="cobro-botones">
+          <button class="btn btn-primary btn-lg cobro-btn-accion"
+                  id="btnCobrarSel" disabled
+                  onclick="abrirConfirmar('seleccion')">
+            💶 Cobrar selección
+          </button>
+          <button class="btn btn-outline btn-lg cobro-btn-accion"
+                  onclick="abrirDividir()">
+            ➗ Dividir en partes
+          </button>
+          <button class="btn btn-success btn-lg cobro-btn-accion"
+                  onclick="abrirConfirmar('todo')">
+            ✅ Cobrar todo
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modalConfirmar">
+    <div class="modal">
+      <h3 id="modalConfirmarTitulo">Confirmar cobro</h3>
+      <p class="modal-sub" id="modalConfirmarSub"></p>
+      <div style="text-align:center;margin:16px 0">
+        <div id="modalImporte" style="font-family:var(--font-display);font-size:44px;font-weight:700;color:var(--brown-800)"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="cerrarModal('modalConfirmar')">Cancelar</button>
+        <button class="btn btn-success" id="btnConfirmarCobro">✅ Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modalDividir">
+    <div class="modal">
+      <h3>➗ Dividir cuenta</h3>
+      <p class="modal-sub">¿En cuántas partes iguales?</p>
+      <div class="dividir-control">
+        <button class="qty-btn minus" onclick="cambiarPartes(-1)">−</button>
+        <span id="numPartes" style="font-size:32px;font-weight:700;min-width:60px;text-align:center">2</span>
+        <button class="qty-btn plus" onclick="cambiarPartes(1)">+</button>
+      </div>
+      <div style="text-align:center;margin:12px 0;color:var(--text-muted);font-size:14px">
+        Cada parte: <strong id="importeParte">0,00 €</strong>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="cerrarModal('modalDividir')">Cancelar</button>
+        <button class="btn btn-primary" onclick="cobrarParte()">💶 Cobrar una parte</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="loader-overlay" id="loader"><div class="spinner"></div></div>
+  <div class="toast-container" id="toastContainer"></div>
+  
+  <div class="modal-overlay" id="modalTicket">
+    <div class="modal modal-ticket">
+      <div id="ticketContenido"></div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="cerrarTicket()">Cerrar</button>
+        <button class="btn btn-primary" onclick="imprimirTicket()">🖨️ Imprimir</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="cobro.js"></script>
+
+</body>
+</html>

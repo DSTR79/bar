@@ -1,162 +1,52 @@
 const API = {
   base: '',
 
-  _headers(token) {
-    const h = { 'Content-Type': 'application/json' };
-    if (token) h['x-mesa-token'] = token;
-    return h;
-  },
-
   async _fetch(url, options = {}) {
-    const res = await fetch(url, options);
-    const text = await res.text(); 
+    const res  = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+    const text = await res.text();
     try {
       const data = JSON.parse(text);
       if (!res.ok) throw new Error(data.error || 'Error desconocido');
       return data;
     } catch (err) {
-      console.error("Respuesta no válida del servidor:", text);
-      if (err instanceof SyntaxError) throw new Error("Error del servidor (PHP). Revisa la consola para ver el detalle.");
+      console.error('Respuesta inválida:', text);
+      if (err instanceof SyntaxError) throw new Error('Error del servidor. Revisa la consola.');
       throw err;
     }
   },
 
-  getProductos() {
-    return this._fetch(`${this.base}api/productos.php`);
+  post(url, body) {
+    return this._fetch(`${this.base}${url}`, { method: 'POST', body: JSON.stringify(body) });
   },
 
-  getMesas() {
-    return this._fetch(`${this.base}api/mesas.php`);
+  getProductos()    { return this._fetch(`${this.base}api/productos.php`); },
+  getCategorias()   { return this._fetch(`${this.base}api/categorias.php`); },
+  getMesas() { return this._fetch(`${this.base}api/mesas_resumen.php`); },
+  getDetalleMesa(id){ return this._fetch(`${this.base}api/mesas.php?action=detalle&id=${id}`); },
+  getLineasCobro(id){ return this._fetch(`${this.base}api/mesas.php?action=lineas_cobro&id=${id}`); },
+
+  crearMesa(nombre) { return this.post('api/mesas.php?action=crear', { nombre }); },
+  entrarMesa(id)    { return this.post('api/mesas.php?action=entrar', { id, camarero: obtenerNombreDispositivo() || 'Sin nombre' }); },
+  guardarYSalir(id, comanda)         { return this.post('api/mesas.php?action=guardar', { id, comanda }); },
+  borrarLineasCanceladas(id, comanda){ return this.post('api/mesas.php?action=salir', { id, comanda }); },
+  actualizarLinea(id, producto_id, cantidad, comanda_id) {
+    return this.post('api/mesas.php?action=linea', { id, producto_id, cantidad, comanda_id });
   },
-
-  crearMesa(nombre) {
-    return this._fetch(`${this.base}api/mesas.php`, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify({ nombre }),
-    });
+  cobrarMesa(id, items, total, todo) {
+    return this.post('api/mesas.php?action=cobrar', { id, items, total, todo });
   },
-
-  entrarMesa(id) {
-    const camarero = obtenerNombreDispositivo() || 'Sin nombre';
-    return this._fetch(`${this.base}api/mesas_entrar.php`, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify({ id, camarero }),
-    });
+  estadoMesa(id, estado) {
+    return this.post('api/mesas.php?action=estado', { id, estado });
   },
-
-  salirMesa(id) {
-   return this._fetch(`${this.base}api/mesas_salir.php`, {
-     method: 'POST',
-     headers: this._headers(),
-     body: JSON.stringify({ id }),
-   });
+  agregarComentario(linea_id, comentario, mesa_id, comanda_id) {
+    return this.post('api/mesas.php?action=comentario', { linea_id, comentario, mesa_id, comanda_id });
   },
-
-  guardarMesa(id,comandaId) {
-    return this._fetch(`${this.base}api/mesas_guardar.php`, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify({ id, comanda: comandaId }),
-    });
+  actualizarLineaPorId(linea_id, cantidad, mesa_id, comanda_id) {
+    return this.post('api/mesas.php?action=linea_id', { linea_id, cantidad, mesa_id, comanda_id });
   },
-
-  getDetalleMesa(id, comandaId) {
-    return this._fetch(`${this.base}api/mesas_detalle.php?id=${id}&comanda=${comandaId}`);
+  repetirLinea(producto_id, texto, mesa_id, comanda_id) {
+    return this.post('api/mesas.php?action=repetir', { producto_id, texto, mesa_id, comanda_id });
   },
-
-  actualizarLinea(id, producto_id, cantidad) {
-    return this._fetch(`${this.base}api/mesas_linea.php`, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify({ id, producto_id, cantidad }),
-    });
-  },
-
-  cobrarMesa(id) {
-    return this._fetch(`${this.base}api/mesas_cobrar.php`, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify({ id }),
-    });
-  },
-
-  getLineasCobro(id) {
-    return this._fetch(`${this.base}api/mesas_lineas_cobro.php?id=${id}`);
-  },
-
-  getCierre() {
-    return this._fetch(`${this.base}api/cierre.php`);
-  },
-
-  nuevoDia() {
-    return this._fetch(`${this.base}api/nuevo_dia.php`, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify({}),
-    });
-  },
-  cancelarPedido(id, token) {
-    return this._fetch(`${this.base}api/mesas_cancelar.php`, {
-      method: 'POST',
-      headers: this._headers(token),
-      body: JSON.stringify({ id }),
-    });
-  },
-
-  actualizarLineaEstado(id, linea_id, estado, comentario) {
-  return this._fetch(`${this.base}api/mesas_linea_estado.php`, {
-    method: 'POST',
-    headers: this._headers(),
-    body: JSON.stringify({ id, linea_id, estado, comentario }),
-  });
-  },
-
-  restaurarPedido(id, lineas) {
-    return this._fetch(`${this.base}api/mesas_restaurar.php`, {
-      method: 'POST',
-      headers: this._headers(),
-      body: JSON.stringify({ id, lineas }),
-   });
-  },
-
-  nuevaMesa(nombre) {
-  return this._fetch(`${this.base}api/mesas.php`, {
-    method: 'POST',
-    headers: this._headers(),
-    body: JSON.stringify({ nombre }),
-  });
-},
-
-guardarYSalir(id, comandaId) {
-  return this._fetch(`${this.base}api/mesas_guardar.php`, {
-    method: 'POST',
-    headers: this._headers(),
-    body: JSON.stringify({ id, comanda: comandaId }),
-  });
-},
-
-borrarLineasCanceladas(id, comandaId) {
-  return this._fetch(`${this.base}api/mesas_salir.php`, {
-    method: 'POST',
-    headers: this._headers(),
-    body: JSON.stringify({ id, comanda: comandaId }),
-  });
-},
-
-actualizarLinea(id, producto_id, cantidad, comandaId) {
-  return this._fetch(`${this.base}api/mesas_linea.php`, {
-    method: 'POST',
-    headers: this._headers(),
-    body: JSON.stringify({ id, producto_id, cantidad, comanda_id: comandaId }),
-  });
-},
-
-getCategorias() {
-  return this._fetch(`${this.base}api/categorias.php`);
-},
-
 };
 
 function obtenerNombreDispositivo() {

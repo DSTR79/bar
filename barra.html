@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Barra · Bar</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link rel="stylesheet" href="barra.css"/>
+</head>
+<body>
+  <header class="header">
+    <div class="header-logo">
+      <span class="icon">🍺</span>
+      <div><h1>BAR</h1><div class="subtitle">BARRA</div></div>
+    </div>
+    <div class="header-right">
+      <div class="header-clock" id="reloj"></div>
+    </div>
+  </header>
+
+  <main class="barra-main" id="barraMain">
+  </main>
+
+  <div class="loader-overlay" id="loader"><div class="spinner"></div></div>
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="api.js"></script>
+  <script src="barra.js"></script>
+</body>
+</html>

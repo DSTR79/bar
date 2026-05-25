@@ -318,7 +318,12 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
-.mesa-header-left { display: flex; align-items: center; gap: 14px; }
+.mesa-header-left { 
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 
 .mesa-header h2 {
   font-family: var(--font-display);
@@ -340,7 +345,7 @@ body {
 .mesa-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: 1fr 480px;
   overflow: hidden;
 }
 
@@ -507,8 +512,8 @@ body {
 .pedido-linea {
   background: var(--brown-50);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 14px 14px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -527,7 +532,7 @@ body {
 
 .pedido-linea-nombre {
   flex: 1;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--brown-800);
   line-height: 1.3;
@@ -537,7 +542,7 @@ body {
   font-family: var(--font-display);
   font-weight: 700;
   color: var(--brown-700);
-  font-size: 14px;
+  font-size: 15px;
   min-width: 52px;
   text-align: right;
 }
@@ -1021,7 +1026,7 @@ body {
     transform: translateX(20px);
   }
 
-  .qty-btn { width: 34px; height: 34px; font-size: 20px; }
+  .qty-btn { width: 36px; height: 36px; font-size: 22px; }
   .qty-val  { font-size: 16px; }
   .producto-row { padding: 12px 10px; }
   .prod-nombre  { font-size: 15px; }
@@ -1130,34 +1135,39 @@ body {
 
 /* ─── TABS PEDIDO ───────────────────────────────────────────── */
 .pedido-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+
   display: flex;
-  border-bottom: 2px solid var(--border);
+  gap: 6px;
+
+  background: var(--bg-card);
+  padding-bottom: 8px;
   margin-bottom: 8px;
-  flex-shrink: 0;
+
+  border-bottom: 1px solid var(--border-light);
 }
 
 .pedido-tab {
   flex: 1;
-  padding: 8px;
+
   border: none;
-  background: transparent;
-  font-family: var(--font-body);
+  background: var(--brown-50);
+
+  padding: 10px 14px;
+  border-radius: var(--radius);
+
   font-size: 13px;
   font-weight: 700;
-  color: var(--text-muted);
+
   cursor: pointer;
-  border-bottom: 3px solid transparent;
-  margin-bottom: -2px;
   transition: all .15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
 }
 
 .pedido-tab.active {
-  color: var(--brown-800);
-  border-bottom-color: var(--gold);
+  background: var(--brown-700);
+  color: white;
 }
 
 .pedido-tab-badge {
@@ -1178,6 +1188,12 @@ body {
   opacity: 0.75;
   background: var(--brown-50) !important;
   border-left: 3px solid var(--brown-300) !important;
+  transition: all .15s ease;
+}
+
+.linea-bloqueada:hover {
+  background: #FFFBEF;
+  border-color: var(--gold);
 }
 
 .estado-tag {
@@ -1268,3 +1284,188 @@ body {
 
 .fav-btn:hover  { color: var(--gold); transform: scale(1.2); }
 .fav-btn.fav-activo { color: var(--gold); }
+
+.cobro-qty-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cobro-qty-max {
+  font-size: 11px;
+  color: var(--text-light);
+}
+
+.pedido-linea-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pedido-qty-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+
+  flex-shrink: 0;
+}
+
+.pedido-qty-control .qty-btn {
+  width: 30px;
+  height: 30px;
+
+  font-size: 18px;
+  border-radius: 7px;
+}
+
+.pedido-qty-control .pedido-linea-qty {
+  min-width: 28px;
+  height: 30px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #fff;
+
+  border: 1px solid var(--border);
+  border-radius: 7px;
+
+  text-align: center;
+
+  font-size: 14px;
+  font-weight: 700;
+
+  color: var(--brown-800);
+
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.04);
+}
+
+.linea-flash {
+  animation: flashPedido .35s ease;
+}
+
+@keyframes flashPedido {
+
+  0% {
+    background: #FFF8D8;
+    border-color: #E7B93E;
+    transform: scale(1);
+  }
+
+  50% {
+    background: #FFF1A6;
+    border-color: #D9A400;
+    transform: scale(1.01);
+  }
+
+  100% {
+    background: '';
+    border-color: '';
+    transform: scale(1);
+  }
+}
+
+.producto-flash {
+  animation: productoFlash .18s ease;
+}
+
+@keyframes productoFlash {
+
+  0% {
+    background: #FFF6D6;
+    border-color: #E7B93E;
+  }
+
+  50% {
+    background: #FFE58F;
+    border-color: #D4A017;
+  }
+
+  100% {
+    background: '';
+    border-color: '';
+  }
+}
+
+.buscar-rapido-box {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg-card);
+  padding: 10px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.buscar-rapido-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  outline: none;
+}
+
+.buscar-rapido-input:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(200,149,42,.15);
+}
+
+.buscar-rapido-resultados {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.buscar-item {
+  padding: 10px;
+  border-radius: var(--radius);
+  background: var(--brown-50);
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+}
+
+.buscar-item:hover {
+  background: var(--gold-light);
+}
+
+.pedido-comentario-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding-top: 4px;
+}
+
+.comentario-send-btn {
+  background: var(--brown-600);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.comentario-send-btn:hover { background: var(--brown-800); }
+
+.modal-ticket {
+  max-width: 420px;
+  font-family: monospace;
+}
+
+.ticket-wrap { padding: 8px 0; }
+.ticket-nombre-bar { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 4px; }
+.ticket-fecha, .ticket-mesa { text-align: center; font-size: 12px; color: var(--text-muted); }
+.ticket-sep { text-align: center; color: var(--border); margin: 10px 0; letter-spacing: 2px; }
+.ticket-tabla { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.ticket-tabla th { border-bottom: 1.5px solid var(--border); padding: 4px; font-size: 12px; }
+.ticket-tabla td { padding: 4px; font-size: 13px; border-bottom: 1px solid var(--border-light); }
+.ticket-total { font-size: 18px; font-weight: 700; text-align: right; margin-top: 10px; color: var(--brown-800); }
+.ticket-gracias { text-align: center; margin-top: 14px; font-size: 12px; color: var(--text-light); }

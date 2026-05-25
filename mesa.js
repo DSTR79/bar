@@ -9,6 +9,11 @@ let subfamilias     = [];
 let familiaActiva   = '__TODAS__';
 let categoriaActiva = '__TODAS__';
 let favoritos       = JSON.parse(localStorage.getItem('bar_favoritos') || '[]');
+let ultimoProductoActualizado = null;
+const sonidoPop = new Audio('sounds/pop.mp3');
+sonidoPop.volume = 0.75;
+let busquedaActiva = false;
+let productosCache = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
   const params = new URLSearchParams(window.location.search);
@@ -35,17 +40,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function cargarDetalleMesa() {
-  const data = await API.getDetalleMesa(mesaId, comandaId);
+  const data = await API.getDetalleMesa(mesaId);
   document.getElementById('mesaNombre').textContent = data.mesa.NOMBRE_MESA;
   
-  const todas = data.lineas;
-  lineas = todas.filter(l => parseInt(l.comanda_id) === parseInt(comandaId));
-  lineasAnteriores = todas.filter(l => parseInt(l.comanda_id) !== parseInt(comandaId));
+  lineas           = (data.lineas || []).filter(l => l.estado !== 'SERVIDO');
+  lineasAnteriores = (data.lineas_anteriores || []).filter(l => l.estado !== 'SERVIDO');
+  lineasIniciales  = JSON.parse(JSON.stringify(lineas));
   
-  lineasIniciales = JSON.parse(JSON.stringify(lineas));
   renderizarPedido();
   renderizarProductos();
 }
+
 
 async function cargarProductos() {
   const [dataProductos, dataCats] = await Promise.all([
@@ -161,18 +166,13 @@ function renderizarProductos() {
     const esFav       = favoritos.includes(p.REF);
 
     return `
-      <div class="producto-row ${qty > 0 ? 'en-pedido' : ''}" id="prod-row-${p.REF}">
+      <div class="producto-row ${qty > 0 ? 'en-pedido' : ''}" id="prod-row-${p.REF}" onclick="agregarProducto(${p.REF})">
         <div class="prod-info">
           <div class="prod-nombre">${escHtml(p.TEXTO_ARTICULO)}</div>
           <div class="prod-cat">${escHtml(p.categoria)}</div>
         </div>
         <button class="fav-btn ${esFav ? 'fav-activo' : ''}" onclick="toggleFavorito(${p.REF})" title="Favorito">★</button>
-        <div class="prod-precio">${parseFloat(p.PV).toFixed(2).replace('.',',')} €</div>
-        <div class="qty-control">
-          <button class="qty-btn minus" onclick="cambiarCantidad(${p.REF}, -1)" ${qty === 0 ? 'disabled' : ''}>−</button>
-          <span class="qty-val" id="qty-${p.REF}">${qty}</span>
-          <button class="qty-btn plus" onclick="cambiarCantidad(${p.REF}, 1)">+</button>
-        </div>
+        <div class="prod-precio">  ${parseFloat(p.PV).toFixed(2).replace('.',',')} €</div>
       </div>`;
   }).join('');
 }
@@ -208,36 +208,25 @@ function renderizarPedido() {
     return `<span class="estado-tag ${cls}">${label}</span>`;
   };
 
-  const renderLineaActual = (l) => `
-    <div class="pedido-linea" id="linea-${l.id}">
-      <div class="pedido-linea-top">
-        <div class="pedido-linea-qty">${parseInt(l.cantidad)}</div>
-        <div class="pedido-linea-nombre">${escHtml(l.producto_nombre)}</div>
-        <div class="pedido-linea-subtotal">${parseFloat(l.subtotal).toFixed(2).replace('.',',')} €</div>
-        <button class="pedido-linea-del" onclick="eliminarLinea(${l.producto_id})" title="Eliminar">✕</button>
-      </div>
-      <div class="pedido-linea-bottom">
-        <div class="comentario-row">
-          <input class="comentario-input" type="text" placeholder="Comentario"
-            value="${escHtml(l.comentario || '')}"
-            onblur="cambiarComentario(${l.id}, this.value)" maxlength="255"/>
-        </div>
-      </div>
-    </div>`;
-
   const renderLineaAnterior = (l) => `
-    <div class="pedido-linea linea-bloqueada" id="linea-${l.id}">
+    <div class="pedido-linea linea-bloqueada"
+        id="linea-${l.id}"
+        onclick="repetirLinea(${l.producto_id}, '${escHtml(l.producto_nombre)}')"
+        style="cursor:pointer">
+
       <div class="pedido-linea-top">
         <div class="pedido-linea-qty">${parseInt(l.cantidad)}</div>
         <div class="pedido-linea-nombre">${escHtml(l.producto_nombre)}</div>
         <div class="pedido-linea-subtotal">${parseFloat(l.subtotal).toFixed(2).replace('.',',')} €</div>
-        <div style="width:22px"></div>
+        <div style="font-size:11px;color:var(--gold)">↺</div>
       </div>
+
       <div class="pedido-linea-bottom">
         ${estadoTag(l.estado)}
         ${l.comentario ? `<div class="comentario-label">${escHtml(l.comentario)}</div>` : ''}
       </div>
-    </div>`;
+    </div>
+  `;
 
   const totalActual   = lineas.reduce((s, l) => s + parseFloat(l.subtotal), 0);
   const totalAnterior = lineasAnteriores.reduce((s, l) => s + parseFloat(l.subtotal), 0);
@@ -268,6 +257,87 @@ function renderizarPedido() {
   `;
 
   actualizarTotal(totalActual + totalAnterior);
+
+  if (ultimoProductoActualizado !== null) {
+
+    const linea = [...document.querySelectorAll('.pedido-linea')]
+      .find(el => {
+        return el.innerHTML.includes(`cambiarCantidad(${ultimoProductoActualizado}`);
+      });
+
+    if (linea) {
+
+      linea.classList.add('linea-flash');
+
+      linea.scrollIntoView({
+        behavior: 'smooth',
+        block: 'end'
+      });
+
+      setTimeout(() => {
+        linea.classList.remove('linea-flash');
+      }, 300);
+    }
+
+    ultimoProductoActualizado = null;
+  }
+}
+
+async function enviarComentario(lineaId) {
+  const input = document.getElementById(`comentario-${lineaId}`);
+  const texto = input.value.trim();
+  if (!texto) return;
+  try {
+    lineas = await API.agregarComentario(lineaId, texto, mesaId, comandaId);
+    renderizarPedido();
+    renderizarProductos();
+  } catch (err) { mostrarToast('Error: ' + err.message, 'error'); }
+}
+
+function renderLineaActual(l) {
+  return `
+    <div class="pedido-linea" id="linea-${l.id}">
+      <div class="pedido-linea-top">
+        <div class="pedido-qty-control">
+          <button class="qty-btn minus" onclick="cambiarCantidadLinea(${l.id}, ${l.producto_id}, -1)">−</button>
+          <span class="pedido-linea-qty">${parseInt(l.cantidad)}</span>
+          <button class="qty-btn plus" onclick="cambiarCantidadLinea(${l.id}, ${l.producto_id}, 1)">+</button>
+        </div>
+        <div class="pedido-linea-nombre">${escHtml(l.producto_nombre)}</div>
+        <div class="pedido-linea-subtotal">${parseFloat(l.subtotal).toFixed(2).replace('.',',')} €</div>
+        <button class="pedido-linea-del" onclick="eliminarLineaPorId(${l.id}, ${l.producto_id})">✕</button>
+      </div>
+      <div class="pedido-comentario-row" onclick="event.stopPropagation()">
+        <input class="comentario-input" type="text" placeholder="✏️ Comentario..."
+               id="comentario-${l.id}"
+               onkeydown="if(event.key==='Enter') enviarComentario(${l.id})"
+               maxlength="60"/>
+        <button class="comentario-send-btn" onclick="enviarComentario(${l.id})">→</button>
+      </div>
+    </div>`;
+}
+
+async function restarUnidad(productoId) {
+  const linea = lineas.find(l => parseInt(l.producto_id) === parseInt(productoId));
+    if (!linea) return;
+    const nuevaCant = Math.max(0, parseInt(linea.cantidad) - 1);
+      try {
+        lineas = await API.actualizarLinea(mesaId, productoId, nuevaCant, comandaId);
+        renderizarPedido();
+        actualizarFilaProducto(productoId);
+      } catch (err) { mostrarToast('Error: ' + err.message, 'error'); }
+  }
+
+async function cambiarCantidadLinea(lineaId, productoId, delta) {
+  const linea = lineas.find(l => l.id === lineaId);
+  if (!linea) return;
+  const nuevaCant = Math.max(0, parseInt(linea.cantidad) + delta);
+  reproducirPop();
+  try {
+    lineas = await API.actualizarLineaPorId(lineaId, nuevaCant, mesaId, comandaId);
+    renderizarPedido();
+    actualizarFilaProducto(productoId);
+  } catch (err) { mostrarToast('Error: ' + err.message, 'error'); }
 }
 
 function switchPedidoTab(tab) {
@@ -286,9 +356,11 @@ async function cambiarCantidad(productoId, delta) {
   const lineaActual = lineas.find(l => parseInt(l.producto_id) === parseInt(productoId));
   const cantActual  = lineaActual ? parseInt(lineaActual.cantidad) : 0;
   const nuevaCant   = Math.max(0, cantActual + delta);
+  feedbackProducto(productoId);
 
   try {
     lineas = await API.actualizarLinea(mesaId, productoId, nuevaCant, comandaId);
+    ultimoProductoActualizado = productoId;
     renderizarPedido();
     actualizarFilaProducto(productoId);
   } catch (err) {
@@ -296,17 +368,57 @@ async function cambiarCantidad(productoId, delta) {
   }
 }
 
-function actualizarFilaProducto(productoId) {
-  const lineaActual = lineas.find(l => parseInt(l.producto_id) === parseInt(productoId));
-  const qty = lineaActual ? parseInt(lineaActual.cantidad) : 0;
+async function repetirLinea(productoId, texto) {
+  try {
+    lineas = await API.repetirLinea(productoId, texto, mesaId, comandaId);
+    renderizarPedido();
+    actualizarFilaProducto(productoId);
+    mostrarToast(`Añadido: ${texto}`, 'success');
+  } catch (err) { mostrarToast('Error: ' + err.message, 'error'); }
+}
 
-  const qtyEl = document.getElementById(`qty-${productoId}`);
+async function agregarProducto(productoId) {
+  const lineaActual = lineas.find(
+    l => parseInt(l.producto_id) === parseInt(productoId)
+  );
+
+  const cantActual = lineaActual
+    ? parseInt(lineaActual.cantidad)
+    : 0;
+
+  feedbackProducto(productoId);
+
+  try {
+    lineas = await API.actualizarLinea(
+      mesaId,
+      productoId,
+      cantActual + 1,
+      comandaId
+    );
+
+    ultimoProductoActualizado = productoId;
+
+    renderizarPedido();
+    actualizarFilaProducto(productoId);
+
+  } catch (err) {
+    mostrarToast('Error: ' + err.message, 'error');
+  }
+}
+
+function actualizarFilaProducto(productoId) {
+  const lineaActual = lineas.find(
+    l => parseInt(l.producto_id) === parseInt(productoId)
+  );
+
+  const qty = lineaActual
+    ? parseInt(lineaActual.cantidad)
+    : 0;
+
   const rowEl = document.getElementById(`prod-row-${productoId}`);
-  if (qtyEl) qtyEl.textContent = qty;
+
   if (rowEl) {
     rowEl.classList.toggle('en-pedido', qty > 0);
-    const minusBtn = rowEl.querySelector('.qty-btn.minus');
-    if (minusBtn) minusBtn.disabled = qty === 0;
   }
 }
 
@@ -320,118 +432,16 @@ async function eliminarLinea(productoId) {
   }
 }
 
-async function abrirCobrar() {
-  setLoader(true);
+async function eliminarLineaPorId(lineaId, productoId) {
   try {
-    const data = await API.getLineasCobro(mesaId);
-    renderizarModalCobro(data.lineas, data.total_pte, data.total);
-    abrirModal('modalCobrar');
-  } catch (err) {
-    mostrarToast('Error: ' + err.message, 'error');
-  } finally {
-    setLoader(false);
-  }
+    lineas = await API.actualizarLineaPorId(lineaId, 0, mesaId, comandaId);
+    renderizarPedido();
+    actualizarFilaProducto(productoId);
+  } catch (err) { mostrarToast('Error: ' + err.message, 'error'); }
 }
 
-function renderizarModalCobro(lineas, totalPte, totalMesa) {
-  document.getElementById('cobroTotalPte').textContent =
-    parseFloat(totalPte).toFixed(2).replace('.', ',') + ' €';
-  document.getElementById('cobroTotalSel').textContent = '0,00 €';
-  document.getElementById('btnCobrarSeleccion').disabled = true;
-
-  const container = document.getElementById('cobroLineas');
-
-  const lineasCobrable = lineas.filter(l => l.estado !== 'EN CURSO');
-
-  if (lineasCobrable.length === 0) {
-    container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-light)">No hay líneas pendientes de cobro</div>';
-    return;
-  }
-
-  const comandas = {};
-  lineasCobrable.forEach(l => {
-    if (!comandas[l.comanda_id]) comandas[l.comanda_id] = [];
-    comandas[l.comanda_id].push(l);
-  });
-
-  container.innerHTML = Object.entries(comandas).map(([cId, cls]) => `
-    <div class="cobro-grupo">
-      <div class="cobro-grupo-header" onclick="toggleGrupoCobro(${cId})">
-        <span>Comanda #${cId}</span>
-        <span>${cls.reduce((s, l) => s + parseFloat(l.subtotal), 0).toFixed(2).replace('.', ',')} €</span>
-      </div>
-      ${cls.map(l => `
-        <div class="cobro-linea ${parseInt(l.seleccionado) ? 'seleccionada' : ''}"
-             id="cobro-linea-${l.id}"
-             onclick="toggleLineaCobro(${l.id}, ${parseFloat(l.subtotal)})">
-          <input type="checkbox" id="chk-${l.id}" ${parseInt(l.seleccionado) ? 'checked' : ''}
-                 onclick="event.stopPropagation(); toggleLineaCobro(${l.id}, ${parseFloat(l.subtotal)})"/>
-          <div class="cobro-linea-info">
-            <div class="cobro-linea-nombre">${escHtml(l.producto_nombre)}</div>
-            <div class="cobro-linea-meta">${parseInt(l.cantidad)} ud. × ${parseFloat(l.precio_unitario).toFixed(2).replace('.', ',')} €</div>
-          </div>
-          <div class="cobro-linea-precio">${parseFloat(l.subtotal).toFixed(2).replace('.', ',')} €</div>
-        </div>
-      `).join('')}
-    </div>
-  `).join('');
-}
-
-function toggleGrupoCobro(comandaId) {
-  const lineas = document.querySelectorAll(`[id^="cobro-linea-"]`);
-}
-
-function toggleLineaCobro(lineaId, subtotal) {
-  const linea = document.getElementById(`cobro-linea-${lineaId}`);
-  const chk   = document.getElementById(`chk-${lineaId}`);
-  linea.classList.toggle('seleccionada');
-  chk.checked = linea.classList.contains('seleccionada');
-  actualizarTotalSeleccion();
-}
-
-function actualizarTotalSeleccion() {
-  const seleccionadas = document.querySelectorAll('.cobro-linea.seleccionada');
-  let total = 0;
-  seleccionadas.forEach(el => {
-    const precio = el.querySelector('.cobro-linea-precio').textContent;
-    total += parseFloat(precio.replace(',', '.'));
-  });
-  document.getElementById('cobroTotalSel').textContent =
-    total.toFixed(2).replace('.', ',') + ' €';
-  document.getElementById('btnCobrarSeleccion').disabled = seleccionadas.length === 0;
-}
-
-async function cobrarSeleccion() {
-  const seleccionadas = document.querySelectorAll('.cobro-linea.seleccionada');
-  if (seleccionadas.length === 0) return;
-
-  const ids   = Array.from(seleccionadas).map(el => parseInt(el.id.replace('cobro-linea-', '')));
-  const total = parseFloat(document.getElementById('cobroTotalSel').textContent.replace(',', '.'));
-
-  setLoader(true);
-  try {
-    await API.cobrarMesa(mesaId, ids, total, false);
-    cerrarModal('modalCobrar');
-    mostrarToast(`Cobrado ${total.toFixed(2).replace('.', ',')} €`, 'success');
-  } catch (err) {
-    mostrarToast('Error: ' + err.message, 'error');
-  } finally {
-    setLoader(false);
-  }
-}
-
-async function cobrarTodo() {
-  setLoader(true);
-  try {
-    await API.cobrarMesa(mesaId, [], 0, true);
-    cerrarModal('modalCobrar');
-    mostrarToast('¡Mesa cobrada completamente!', 'success');
-    setTimeout(() => window.location.href = 'index.html', 1200);
-  } catch (err) {
-    mostrarToast('Error: ' + err.message, 'error');
-  } finally {
-    setLoader(false);
-  }
+function abrirCobrar() {
+  window.location.href = `cobro.html?id=${mesaId}`;
 }
 
 async function confirmarSalir() {
@@ -508,14 +518,6 @@ function bindEventos() {
   const btnCobrar = document.getElementById('btnCobrar');
   if (btnCobrar) btnCobrar.addEventListener('click', abrirCobrar);
 
-  const btnCancelarCobrar = document.getElementById('btnCancelarCobrar');
-  if (btnCancelarCobrar) btnCancelarCobrar.addEventListener('click', () => cerrarModal('modalCobrar'));
-
-  const btnCobrarSeleccion = document.getElementById('btnCobrarSeleccion');
-  if (btnCobrarSeleccion) btnCobrarSeleccion.addEventListener('click', cobrarSeleccion);
-
-  const btnCobrarTodo = document.getElementById('btnCobrarTodo');
-  if (btnCobrarTodo) btnCobrarTodo.addEventListener('click', cobrarTodo);
 }
 
 function switchTab(tab) {
@@ -547,6 +549,22 @@ async function cambiarComentario(lineaId, nuevoComentario) {
   } catch (err) {
     mostrarToast('Error: ' + err.message, 'error');
   }
+}
+
+function reproducirPop() {
+
+  sonidoPop.currentTime = 0;
+
+  sonidoPop.play().catch(() => {});
+}
+
+function feedbackProducto(productoId) {
+  reproducirPop();
+  const row = document.getElementById(`prod-row-${productoId}`);
+  if (!row) return;
+  row.classList.remove('producto-flash');
+  void row.offsetWidth;
+  row.classList.add('producto-flash');
 }
 
 function escHtml(str) {
